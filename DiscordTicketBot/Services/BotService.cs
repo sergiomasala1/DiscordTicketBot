@@ -8,10 +8,6 @@ using DiscordTicketBot.Database;
 
 namespace DiscordTicketBot.Services;
 
-/// <summary>
-/// Serviço hospedado que gerencia o ciclo de vida do bot Discord.
-/// Inicializa a conexão, registra eventos e mantém o bot online.
-/// </summary>
 public class BotService : IHostedService
 {
     private readonly DiscordSocketClient _client;
@@ -40,29 +36,26 @@ public class BotService : IHostedService
         _buttonHandler = buttonHandler;
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // IHostedService
-    // ──────────────────────────────────────────────────────────────
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // 1. Inicializa banco de dados
         await _dbInit.InitializeAsync();
 
-        // 2. Registra eventos do Discord
         RegisterEvents();
 
-        // 3. Autentica e conecta o bot
-        var token = _config["Discord:Token"]
-            ?? Environment.GetEnvironmentVariable("DISCORD_TOKEN")
-            ?? throw new InvalidOperationException(
-                "Token do Discord não encontrado. Configure Discord:Token no appsettings.json " +
-                "ou a variável de ambiente DISCORD_TOKEN.");
+        // Lê token: primeiro tenta variável de ambiente, depois appsettings
+        var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
+
+        if (string.IsNullOrWhiteSpace(token))
+            token = _config["Discord:Token"];
+
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException(
+                "Token do Discord não encontrado! Configure a variável de ambiente DISCORD_TOKEN no Railway.");
+
+        _logger.LogInformation("Token encontrado, conectando ao Discord...");
 
         await _client.LoginAsync(TokenType.Bot, token);
         await _client.StartAsync();
-
-        _logger.LogInformation("Bot Discord iniciando...");
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -72,44 +65,23 @@ public class BotService : IHostedService
         await _client.LogoutAsync();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Registro de eventos
-    // ──────────────────────────────────────────────────────────────
-
     private void RegisterEvents()
     {
-        // Log interno do Discord.Net → nosso logger
         _client.Log += OnLogAsync;
-
-        // Bot ficou pronto (conectado e guilds carregadas)
         _client.Ready += OnReadyAsync;
-
-        // Slash commands
         _client.SlashCommandExecuted += _slashHandler.HandleSlashCommandAsync;
-
-        // Modais (formulários pop-up)
         _client.ModalSubmitted += _modalHandler.HandleModalSubmittedAsync;
-
-        // Botões
         _client.ButtonExecuted += _buttonHandler.HandleButtonExecutedAsync;
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Event Handlers
-    // ──────────────────────────────────────────────────────────────
 
     private async Task OnReadyAsync()
     {
         _logger.LogInformation(
-            "Bot conectado como {Username}#{Discriminator} em {GuildCount} servidor(es).",
+            "Bot conectado como {Username} em {GuildCount} servidor(es).",
             _client.CurrentUser.Username,
-            _client.CurrentUser.Discriminator,
             _client.Guilds.Count);
 
-        // Define o status de presença do bot
         await _client.SetGameAsync("Monitorando chamados 🎫", type: ActivityType.Watching);
-
-        // Registra os slash commands em todas as guilds
         await _slashHandler.RegisterCommandsAsync();
     }
 
